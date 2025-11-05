@@ -1,14 +1,29 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import json
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='')
 CORS(app)
 
-# ============================================
+@app.route('/')
+def home():
+    return send_file('chatbot.html')
+
+@app.route('/CSS/<path:path>')
+def send_css(path):
+    return send_from_directory('CSS', path)
+
+@app.route('/img/<path:path>')
+def send_img(path):
+    return send_from_directory('img', path)
+
+@app.route('/video/<path:path>')
+def send_video(path):
+    return send_from_directory('video', path)
+
+
 # Carga del dataset desde archivo JSON
-# ============================================
 DATA_FILE = os.path.join(os.path.dirname(__file__), 'dataset.json')
 
 def load_dataset():
@@ -19,9 +34,8 @@ def load_dataset():
 
 DATASET = load_dataset()
 
-# ============================================
+
 # Menú principal estructurado
-# ============================================
 MAIN_MENU = {
     "1": {"name": "Reservas y precios", "intent": "reserva_info"},
     "2": {"name": "Habitaciones", "intent": "habitacion_info"},
@@ -33,18 +47,20 @@ MAIN_MENU = {
     "8": {"name": "Reportar un problema", "intent": "quejas"}
 }
 
-# ============================================
+
 # Contexto temporal de usuario (por sesión)
-# ============================================
+
 USER_CONTEXT = {}  # { session_id: { "intent": str, "submenu": list } }
 
-# ============================================
+
 # Funciones auxiliares
-# ============================================
 def show_main_menu():
-    menu_text = "🏖️ *Bienvenido al Hotel Paraíso Azul*\n\nSelecciona una opción:\n\n"
+    menu_text = "🏖️ *Bienvenido al Hotel Paraíso Azul*\n\n"
+    menu_text += "Selecciona una opción:\n"
+    
     for key, item in MAIN_MENU.items():
-        menu_text += f"{key}. {item['name']}\n\n"
+        menu_text += f"{key}. {item['name']}\n"
+    
     menu_text += "\nEscribe el número de la opción o 'salir' para terminar."
     return menu_text
 
@@ -58,9 +74,8 @@ def show_submenu(intent):
     submenu_text += "\nEscribe el número de la pregunta para ver la respuesta o 'menu' para regresar al inicio."
     return submenu_text
 
-# ============================================
+
 # Lógica principal del chatbot
-# ============================================
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.get_json()
@@ -107,9 +122,8 @@ def chat():
     # Si no coincide con ninguna opción
     return jsonify({'reply': "No entendí tu solicitud. Escribe 'menu' para ver las opciones disponibles.", 'source': 'default'})
 
-# ============================================
+
 #  Endpoints adicionales opcionales (debug/consulta)
-# ============================================
 @app.route('/menu', methods=['GET'])
 def menu():
     intents = {}
@@ -131,8 +145,9 @@ def faq(item_id):
             return jsonify({'id': it.get('id'), 'question': it.get('question'), 'answer': it.get('response')})
     return jsonify({'error': 'not found'}), 404
 
-# ============================================
+
 # Ejecución del servidor Flask
-# ============================================
 if __name__ == '__main__':
     app.run(debug=True)
+
+
