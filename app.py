@@ -457,6 +457,77 @@ def admin_import():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/admin/tickets/pending', methods=['GET'])
+def admin_get_pending_tickets():
+    """Obtiene los tickets pendientes desde la base de datos"""
+    try:
+        import db
+        conn = db.get_connection()
+        cur = conn.cursor()
+        
+        # Obtener tickets con estado 'pendiente' o 'en_proceso'
+        cur.execute("""
+            SELECT id_ticket, codigo_ticket, nombre_cliente, telefono_cliente, 
+                   correo_cliente, fecha_entrada, fecha_salida, 
+                   estado, fecha_creacion
+            FROM tickets
+            WHERE estado IN ('pendiente', 'En Proceso')
+            ORDER BY fecha_creacion DESC
+        """)
+        
+        rows = cur.fetchall()
+        
+        tickets = []
+        for row in rows:
+            tickets.append({
+                'id_ticket': row[0],
+                'codigo_ticket': row[1],
+                'nombre_cliente': row[2],
+                'telefono_cliente': row[3],
+                'correo_cliente': row[4],
+                'fecha_entrada': row[5].strftime('%Y-%m-%d') if row[5] else None,
+                'fecha_salida': row[6].strftime('%Y-%m-%d') if row[6] else None,
+                'estado': row[7],
+                'fecha_creacion': row[8].strftime('%Y-%m-%d %H:%M:%S') if row[8] else None
+            })
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'tickets': tickets, 'count': len(tickets)})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/tickets/update-status', methods=['POST'])
+def admin_update_ticket_status():
+    """Actualiza el estado de un ticket"""
+    try:
+        import db
+        data = request.get_json()
+        ticket_id = data.get('id_ticket')
+        new_status = data.get('estado')
+        
+        if not ticket_id or not new_status:
+            return jsonify({'success': False, 'error': 'Faltan parámetros requeridos'}), 400
+        
+        conn = db.get_connection()
+        cur = conn.cursor()
+        
+        # Actualizar el estado del ticket
+        cur.execute("""
+            UPDATE tickets
+            SET estado = %s
+            WHERE id_ticket = %s
+        """, (new_status, ticket_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Estado actualizado exitosamente'})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def save_dataset():
     """Guarda el dataset en el archivo JSON"""
     with open(DATA_FILE, 'w', encoding='utf-8') as f:

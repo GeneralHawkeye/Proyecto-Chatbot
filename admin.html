@@ -19,6 +19,7 @@
                 <button class="nav-item" onclick="showSection('list-items')">📋 Ver Q&A</button>
                 <button class="nav-item" onclick="showSection('add-item')">➕ Agregar Q&A</button>
                 <button class="nav-item" onclick="showSection('import-export')">📥📤 Importar/Exportar</button>
+                <button class="nav-item" onclick="showSection('tickets')">📥📤 Tickets</button>
             </div>
 
             <div class="main-content">
@@ -101,6 +102,40 @@
                     </div>
                     <button class="btn btn-primary" onclick="importData()">📤 Importar JSON</button>
                 </div>
+                 <div id="tickets" class="section">
+                    <h2>Gestión de Tickets</h2>
+                    <div id="tickets-alert"></div>
+                    <div class="stats" style="margin-bottom: 20px;">
+                        <div class="stat-card">
+                            <h3>Tickets Activos</h3>
+                            <div class="value" id="pending-count">0</div>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="tickets-table">
+                            <thead>
+                                <tr>
+                                    <th>Código</th>
+                                    <th>Cliente</th>
+                                    <th>Teléfono</th>
+                                    <th>Correo</th>
+                                    <th>Fecha Entrada</th>
+                                    <th>Fecha Salida</th>
+                                    <th>Fecha Creación</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tickets-tbody">
+                                <tr>
+                                    <td colspan="9" style="text-align: center; padding: 40px;">
+                                        <div class="spinner" style="margin: 0 auto;"></div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
             </div>
         </div>
     </div>
@@ -153,6 +188,8 @@
                 loadDashboard();
             } else if (sectionId === 'list-items') {
                 loadItems();
+            } else if (sectionId === 'tickets') {
+                loadPendingTickets();
             }
         }
 
@@ -403,6 +440,100 @@
         function logout() {
             localStorage.removeItem('admin-token');
             window.location.href = '/admin-login';
+        }
+
+        // Actualizar estado de ticket
+        async function updateTicketStatus(ticketId, newStatus) {
+            const statusText = newStatus === 'en_proceso' ? 'En Proceso' : 'Cerrado';
+            
+            if (!confirm(`¿Estás seguro de cambiar el estado del ticket a "${statusText}"?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/admin/tickets/update-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_ticket: ticketId, estado: newStatus })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('tickets-alert', `✅ Ticket actualizado a "${statusText}"`, 'success');
+                    
+                    // Solo remover el ticket de la tabla si está cerrado
+                    if (newStatus === 'cerrado') {
+                        const row = document.getElementById(`ticket-row-${ticketId}`);
+                        if (row) {
+                            row.remove();
+                            // Actualizar contador
+                            const currentCount = parseInt(document.getElementById('pending-count').textContent);
+                            document.getElementById('pending-count').textContent = currentCount - 1;
+                            
+                            // Si no quedan tickets, mostrar mensaje
+                            const tbody = document.getElementById('tickets-tbody');
+                            if (tbody.children.length === 0) {
+                                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px;">No hay tickets activos</td></tr>';
+                            }
+                        }
+                    } else {
+                        // Recargar la lista para actualizar el badge y botones
+                        loadPendingTickets();
+                    }
+                } else {
+                    showAlert('tickets-alert', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showAlert('tickets-alert', '❌ Error al actualizar ticket: ' + error.message, 'error');
+            }
+        }
+
+        // Cargar tickets pendientes
+        async function loadPendingTickets() {
+            try {
+                const response = await fetch('/admin/tickets/pending');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const tickets = data.tickets;
+                    document.getElementById('pending-count').textContent = data.count;
+                    
+                    const tbody = document.getElementById('tickets-tbody');
+                    
+                    if (tickets.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px;">No hay tickets pendientes</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = tickets.map(ticket => {
+                        const badgeClass = ticket.estado === 'pendiente' ? 'badge-warning' : 'badge-primary';
+                        const showEnProcesoBtn = ticket.estado === 'pendiente';
+                        return `
+                        <tr id="ticket-row-${ticket.id_ticket}">
+                            <td><strong>${ticket.codigo_ticket}</strong></td>
+                            <td>${ticket.nombre_cliente}</td>
+                            <td>${ticket.telefono_cliente || '-'}</td>
+                            <td>${ticket.correo_cliente || '-'}</td>
+                            <td>${ticket.fecha_entrada || '-'}</td>
+                            <td>${ticket.fecha_salida || '-'}</td>
+                            <td>${ticket.fecha_creacion}</td>
+                            <td><span class="badge ${badgeClass}">${ticket.estado}</span></td>
+                            <td>
+                                ${showEnProcesoBtn ? `<button class="btn btn-primary" onclick="updateTicketStatus(${ticket.id_ticket}, 'en_proceso')" style="font-size: 12px; padding: 5px 10px; margin-right: 5px;">En Proceso</button>` : ''}
+                                <button class="btn btn-success" onclick="updateTicketStatus(${ticket.id_ticket}, 'cerrado')" style="font-size: 12px; padding: 5px 10px;">Cerrar</button>
+                            </td>
+                        </tr>
+                        `;
+                    }).join('');
+                    
+                    showAlert('tickets-alert', `✅ ${data.count} tickets pendientes cargados`, 'success');
+                } else {
+                    showAlert('tickets-alert', '❌ Error: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showAlert('tickets-alert', '❌ Error al cargar tickets: ' + error.message, 'error');
+            }
         }
 
         // Verificar autenticación al cargar
