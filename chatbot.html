@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="CSS/footer.css">
     <link rel="stylesheet" href="CSS/main.css">
     <link rel="stylesheet" href="CSS/chatbot.css">
+    <link rel="stylesheet" href="CSS/modal.css">
 </head>
 <body>
 
@@ -50,6 +51,24 @@
   </header>
 
   <main>
+      <!-- Modal de contacto -->
+    <div id="modalContacto" class="modal">
+      <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>📩 Contacta al personal del hotel</h2>
+        <form id="formContacto">
+          <label>Nombre:</label><br>
+          <input type="text" name="nombre" required><br><br>
+          <label>Correo:</label><br>
+          <input type="email" name="correo" required><br><br>
+          <label>Detalles de la consulta:</label><br>
+          <textarea name="mensaje" rows="5" required></textarea><br><br>
+          <button type="submit">Enviar</button>
+        </form>
+        <div id="mensajeExito" style="display:none; color:green; margin-top:10px;"></div>
+      </div>
+    </div>
+
     <section class="dining-showcase">
       <div class="intro">
         <h2>CUATRO EXPERIENCIAS GASTRONÓMICAS ÚNICAS</h2>
@@ -100,6 +119,8 @@
     <a href="#" class="chatbot-button">
       <img src="/img/12205168.gif" alt="Chatbot">
     </a>
+
+
 
 
     <div id="chatbox">
@@ -155,6 +176,7 @@
           <li><a href="#">Reseñas del hotel</a></li>
           <li><a href="#">Ubicacion</a></li>
           <li><a href="#">Contactanos</a></li>
+          <li><a href="/admin-login" style="color: #667eea; font-weight: bold;">🔐 Panel Admin</a></li>
         </ul>
       </div>
 
@@ -169,7 +191,54 @@
     </div>
   </footer>
 
+
+
     <script>
+        const modal = document.getElementById("modalContacto");
+  const span = document.querySelector(".close");
+  const form = document.getElementById("formContacto");
+  const mensajeExito = document.getElementById("mensajeExito");
+
+  // Escuchar respuestas del chatbot
+  function procesarRespuestaChatbot(respuesta) {
+    if (respuesta.source === 'formulario') {
+      modal.style.display = "block";
+    }
+  }
+
+  // Cerrar modal
+  span.onclick = () => modal.style.display = "none";
+  window.onclick = (event) => {
+    if (event.target == modal) modal.style.display = "none";
+  };
+
+  // Enviar formulario por AJAX
+  form.addEventListener("submit", function(e) {
+    e.preventDefault();
+    const datos = {
+  nombre: form.nombre.value,
+  correo: form.correo.value,
+  mensaje: form.mensaje.value
+};
+
+fetch('/enviar-contacto', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(datos)
+})
+.then(res => res.json())
+.then(msg => {
+  mensajeExito.textContent = msg.reply;
+  mensajeExito.style.display = "block";
+  form.reset();
+})
+.catch(err => {
+  mensajeExito.textContent = "❌ Error al enviar el mensaje.";
+  mensajeExito.style.color = "red";
+  mensajeExito.style.display = "block";
+});
+  });
+
         const toggleMenu = document.getElementById('toggleMenu');
         const menu = document.getElementById('menu');
         const categories = document.getElementById('categories');
@@ -214,7 +283,7 @@
         function appendMessage(text, sender) {
             const msg = document.createElement('div');
             msg.className = sender;
-            msg.textContent = text;
+            msg.innerHTML = text.replace(/\n/g, "<br>");
             messages.appendChild(msg);
             messages.scrollTop = messages.scrollHeight;
         }
@@ -222,7 +291,7 @@
         send.onclick = async function() {
             const userMsg = input.value.trim();
             if (!userMsg) return;
-            appendMessage('You: ' + userMsg, 'user');
+            appendMessage('Tu: ' + userMsg, 'user');
             input.value = '';
             const res = await fetch('http://127.0.0.1:5000/chat', {
                 method: 'POST',
@@ -231,6 +300,9 @@
             });
             const data = await res.json();
             appendMessage('Bot: ' + data.reply, 'bot');
+
+            // Procesar acciones especiales del bot
+            procesarRespuestaChatbot(data);
         };
 
         input.addEventListener('keydown', function(e) {

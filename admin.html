@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administrador - Chatbot</title>
+    <link rel="stylesheet" href="/CSS/admin.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Panel de Administrador</h1>
+            <button class="logout-btn" onclick="logout()">Cerrar Sesión</button>
+        </div>
+
+        <div class="content">
+            <div class="sidebar">
+                <button class="nav-item active" onclick="showSection('dashboard')">📊 Dashboard</button>
+                <button class="nav-item" onclick="showSection('list-items')">📋 Ver Q&A</button>
+                <button class="nav-item" onclick="showSection('add-item')">➕ Agregar Q&A</button>
+                <button class="nav-item" onclick="showSection('import-export')">📥📤 Importar/Exportar</button>
+            </div>
+
+            <div class="main-content">
+                <!-- Dashboard Section -->
+                <div id="dashboard" class="section active">
+                    <h2>Dashboard</h2>
+                    <div class="stats" id="stats-container">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                    <div id="dashboard-alert"></div>
+                </div>
+
+                <!-- List Items Section -->
+                <div id="list-items" class="section">
+                    <h2>Preguntas y Respuestas</h2>
+                    <input type="text" id="search-input" placeholder="🔍 Buscar pregunta..." style="margin-bottom: 20px;">
+                    <div class="table-container">
+                        <table id="items-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Pregunta</th>
+                                    <th>Respuesta</th>
+                                    <th>Intent</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="items-tbody">
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 40px;">
+                                        <div class="spinner" style="margin: 0 auto;"></div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Add Item Section -->
+                <div id="add-item" class="section">
+                    <h2>Agregar Nueva Pregunta y Respuesta</h2>
+                    <div id="add-alert"></div>
+                    <form id="add-form" onsubmit="addItem(event)">
+                        <div class="form-group">
+                            <label for="new-id">ID:</label>
+                            <input type="text" id="new-id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-question">Pregunta:</label>
+                            <input type="text" id="new-question" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-response">Respuesta:</label>
+                            <textarea id="new-response" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-intent">Intent:</label>
+                            <input type="text" id="new-intent" placeholder="ej: reserva_info">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Agregar Pregunta</button>
+                        <button type="button" class="btn btn-secondary" onclick="resetForm()">Limpiar</button>
+                    </form>
+                </div>
+
+                <!-- Import/Export Section -->
+                <div id="import-export" class="section">
+                    <h2>Importar / Exportar Datos</h2>
+                    <div id="import-alert"></div>
+                    
+                    <h3 style="margin-top: 30px; margin-bottom: 15px;">Exportar Datos</h3>
+                    <p style="margin-bottom: 15px; color: #666;">Descargar el archivo dataset.json actual:</p>
+                    <button class="btn btn-primary" onclick="exportData()">📥 Descargar JSON</button>
+
+                    <h3 style="margin-top: 30px; margin-bottom: 15px;">Importar Datos</h3>
+                    <p style="margin-bottom: 15px; color: #666;">Selecciona un archivo JSON para importar:</p>
+                    <div class="form-group">
+                        <input type="file" id="import-file" accept=".json" style="padding: 0;">
+                    </div>
+                    <button class="btn btn-primary" onclick="importData()">📤 Importar JSON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeEditModal()">&times;</span>
+            <div class="modal-header">Editar Pregunta y Respuesta</div>
+            <form id="edit-form" onsubmit="saveEdit(event)">
+                <div class="form-group">
+                    <label for="edit-id">ID:</label>
+                    <input type="text" id="edit-id" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="edit-question">Pregunta:</label>
+                    <input type="text" id="edit-question" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-response">Respuesta:</label>
+                    <textarea id="edit-response" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-intent">Intent:</label>
+                    <input type="text" id="edit-intent">
+                </div>
+                <div class="action-buttons">
+                    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Cancelar</button>
+                    <button type="button" class="btn btn-danger" onclick="deleteItem()">Eliminar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+
+    <script>
+        let allItems = [];
+        let currentEditId = null;
+
+        // Mostrar secciones
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
+            document.getElementById(sectionId).classList.add('active');
+            event.target.classList.add('active');
+
+            if (sectionId === 'dashboard') {
+                loadDashboard();
+            } else if (sectionId === 'list-items') {
+                loadItems();
+            }
+        }
+
+        // Cargar dashboard
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/admin/stats');
+                const data = await response.json();
+                
+                const statsHtml = `
+                    <div class="stat-card">
+                        <h3>Total de Q&A</h3>
+                        <div class="value">${data.total_items}</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Intents Únicos</h3>
+                        <div class="value">${data.unique_intents}</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Último Actualizado</h3>
+                        <div class="value" style="font-size: 16px;">${data.last_modified}</div>
+                    </div>
+                `;
+                
+                document.getElementById('stats-container').innerHTML = statsHtml;
+                showAlert('dashboard-alert', `Dataset cargado correctamente. Total: ${data.total_items} preguntas.`, 'success');
+            } catch (error) {
+                showAlert('dashboard-alert', 'Error al cargar estadísticas: ' + error.message, 'error');
+            }
+        }
+
+        // Cargar items
+        async function loadItems() {
+            try {
+                const response = await fetch('/admin/items');
+                const data = await response.json();
+                allItems = data.items;
+                renderTable(allItems);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Renderizar tabla
+        function renderTable(items) {
+            const tbody = document.getElementById('items-tbody');
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px;">No hay items</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = items.map(item => `
+                <tr>
+                    <td>${item.id}</td>
+                    <td class="text-truncate">${item.question}</td>
+                    <td class="text-truncate">${item.response}</td>
+                    <td>${item.intent || '-'}</td>
+                    <td>
+                        <button class="btn btn-edit" onclick="editItem('${item.id}')">Editar</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Filtro de búsqueda
+        document.getElementById('search-input').addEventListener('keyup', function() {
+            const searchTerm = this.value.toLowerCase();
+            const filtered = allItems.filter(item =>
+                item.question.toLowerCase().includes(searchTerm) ||
+                item.response.toLowerCase().includes(searchTerm)
+            );
+            renderTable(filtered);
+        });
+
+        // Agregar item
+        async function addItem(event) {
+            event.preventDefault();
+            
+            const item = {
+                id: document.getElementById('new-id').value,
+                question: document.getElementById('new-question').value,
+                response: document.getElementById('new-response').value,
+                intent: document.getElementById('new-intent').value || 'general'
+            };
+
+            try {
+                const response = await fetch('/admin/add-item', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(item)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showAlert('add-alert', '✅ Pregunta agregada exitosamente', 'success');
+                    document.getElementById('add-form').reset();
+                    loadItems();
+                } else {
+                    showAlert('add-alert', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showAlert('add-alert', '❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        // Editar item
+        async function editItem(id) {
+            const item = allItems.find(i => i.id === id);
+            if (!item) return;
+
+            currentEditId = id;
+            document.getElementById('edit-id').value = item.id;
+            document.getElementById('edit-question').value = item.question;
+            document.getElementById('edit-response').value = item.response;
+            document.getElementById('edit-intent').value = item.intent || '';
+
+            document.getElementById('edit-modal').classList.add('active');
+        }
+
+        // Guardar edición
+        async function saveEdit(event) {
+            event.preventDefault();
+
+            const updated = {
+                id: currentEditId,
+                question: document.getElementById('edit-question').value,
+                response: document.getElementById('edit-response').value,
+                intent: document.getElementById('edit-intent').value
+            };
+
+            try {
+                const response = await fetch('/admin/update-item', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updated)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showAlert('list-items', '✅ Pregunta actualizada', 'success');
+                    closeEditModal();
+                    loadItems();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Eliminar item
+        async function deleteItem() {
+            if (!confirm('¿Estás seguro de que quieres eliminar esta pregunta?')) return;
+
+            try {
+                const response = await fetch('/admin/delete-item', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: currentEditId })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showAlert('list-items', '✅ Pregunta eliminada', 'success');
+                    closeEditModal();
+                    loadItems();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Cerrar modal
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.remove('active');
+            currentEditId = null;
+        }
+
+        // Resetear formulario
+        function resetForm() {
+            document.getElementById('add-form').reset();
+        }
+
+        // Exportar datos
+        async function exportData() {
+            try {
+                const response = await fetch('/admin/export');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dataset.json';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Error al exportar: ' + error.message);
+            }
+        }
+
+        // Importar datos
+        async function importData() {
+            const file = document.getElementById('import-file').files[0];
+            if (!file) {
+                showAlert('import-alert', 'Por favor selecciona un archivo', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/admin/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showAlert('import-alert', '✅ Datos importados exitosamente', 'success');
+                    document.getElementById('import-file').value = '';
+                    loadItems();
+                } else {
+                    showAlert('import-alert', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showAlert('import-alert', '❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        // Mostrar alertas
+        function showAlert(elementId, message, type) {
+            const alertDiv = document.getElementById(elementId);
+            if (!alertDiv) return;
+            
+            alertDiv.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            setTimeout(() => {
+                alertDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Logout
+        function logout() {
+            localStorage.removeItem('admin-token');
+            window.location.href = '/admin-login';
+        }
+
+        // Verificar autenticación al cargar
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('admin-token');
+            if (!token) {
+                window.location.href = '/admin-login';
+            } else {
+                loadDashboard();
+            }
+        });
+    </script>
+</body>
+</html>

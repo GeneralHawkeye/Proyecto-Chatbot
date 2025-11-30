@@ -129,14 +129,9 @@ button:hover {
     flex: 0 0 auto;
     overflow-y: auto; 
     padding-right: 8px; 
-    max-height: 200px;
+    max-height: 150px;
 }
 
-#categories, #questions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
 
 #questions {
     max-height: 140px; 

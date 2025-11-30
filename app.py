@@ -1,29 +1,29 @@
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import json
 import os
+import re
+from difflib import SequenceMatcher
+import torch
+from sentence_transformers import SentenceTransformer, util
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-app = Flask(__name__, static_url_path='')
+
+app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
 
 @app.route('/')
 def home():
     return send_file('chatbot.html')
 
-@app.route('/CSS/<path:path>')
-def send_css(path):
-    return send_from_directory('CSS', path)
-
-@app.route('/img/<path:path>')
-def send_img(path):
-    return send_from_directory('img', path)
-
-@app.route('/video/<path:path>')
-def send_video(path):
-    return send_from_directory('video', path)
-
-
 # Carga del dataset desde archivo JSON
+
 DATA_FILE = os.path.join(os.path.dirname(__file__), 'dataset.json')
 
 def load_dataset():
@@ -34,6 +34,48 @@ def load_dataset():
 
 DATASET = load_dataset()
 
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[¿?¡!.,]', '', text)
+    return text.strip()
+
+
+def split_questions(text):
+    # Dividir por conectores o signos de puntuación
+    parts = re.split(r'\?|y |además|también|,|\.|;', text.lower())
+    # Quitar vacíos y limpiar espacios
+    return [p.strip() for p in parts if len(p.strip()) > 3]
+
+
+# ============================================
+# Chatbot semántico (modelo de comprensión)
+# ============================================
+data = load_dataset()
+questions = [clean_text(item["question"]) for item in data]
+responses = [item["response"] for item in data]
+print("Cargando modelo de comprensión semántica... (esto tarda unos segundos)")
+model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+embeddings = model.encode(questions, convert_to_tensor=True)
+
+
+def get_responses(user_input, threshold=0.5):
+    subquestions = split_questions(user_input)
+    found_responses = []
+
+    for sub in subquestions:
+        sub_clean = clean_text(sub)
+        user_emb = model.encode(sub_clean, convert_to_tensor=True)
+        similarities = util.cos_sim(user_emb, embeddings)
+
+        best_match_index = int(torch.argmax(similarities))
+        best_score = float(similarities[0][best_match_index])
+
+        if best_score >= threshold:
+            found_responses.append(responses[best_match_index])
+
+    
+
+    return list(dict.fromkeys(found_responses))
 
 # Menú principal estructurado
 MAIN_MENU = {
@@ -47,21 +89,16 @@ MAIN_MENU = {
     "8": {"name": "Reportar un problema", "intent": "quejas"}
 }
 
-
 # Contexto temporal de usuario (por sesión)
-
 USER_CONTEXT = {}  # { session_id: { "intent": str, "submenu": list } }
-
 
 # Funciones auxiliares
 def show_main_menu():
-    menu_text = "🏖️ *Bienvenido al Hotel Paraíso Azul*\n\n"
-    menu_text += "Selecciona una opción:\n"
-    
+    menu_text = "🏖️ *Bienvenido al Hotel Paraíso Azul*\n\nSelecciona una opción:\n"
     for key, item in MAIN_MENU.items():
         menu_text += f"{key}. {item['name']}\n"
-    
     menu_text += "\nEscribe el número de la opción o 'salir' para terminar."
+    
     return menu_text
 
 def show_submenu(intent):
@@ -74,10 +111,11 @@ def show_submenu(intent):
     submenu_text += "\nEscribe el número de la pregunta para ver la respuesta o 'menu' para regresar al inicio."
     return submenu_text
 
-
 # Lógica principal del chatbot
 @app.route('/chat', methods=['POST'])
 def chat():
+    # Si el usuario está en contexto de contacto directo
+    
     data = request.get_json()
     user_message = data.get('message', '').strip()
     session_id = data.get('session', 'default')
@@ -111,6 +149,31 @@ def chat():
         USER_CONTEXT.pop(session_id, None)
         return jsonify({'reply': show_main_menu(), 'source': 'menu'})
 
+    # Si el usuario está en contexto de contacto directo
+    if context.get('intent') == 'contacto_directo':
+        if msg in ['sí', 'si', 'claro', 'ok', 'quiero']:
+            USER_CONTEXT.pop(session_id, None)
+            return jsonify({
+                'reply': "Abriendo formulario de contacto...",
+                'source': 'formulario',
+                'form': '/formulario_contacto'
+            })
+
+        elif msg in ['no', 'nah', 'no gracias']:
+            # Reinicia el chatbot completamente
+            USER_CONTEXT.pop(session_id, None)
+            return jsonify({
+                'reply': "Entendido 😊. Volviendo al menú principal...\n\n" + show_main_menu(),
+                'source': 'menu'
+            })
+
+        else:
+            return jsonify({
+                'reply': "¿Quieres contactar directamente con el personal del hotel? (Responde 'sí' o 'no')",
+                'source': 'confirmacion'
+            })
+
+
     # Si elige una opción del menú principal
     if msg in MAIN_MENU:
         intent = MAIN_MENU[msg]['intent']
@@ -119,9 +182,73 @@ def chat():
         reply = show_submenu(intent)
         return jsonify({'reply': reply, 'source': 'submenu'})
 
-    # Si no coincide con ninguna opción
-    return jsonify({'reply': "No entendí tu solicitud. Escribe 'menu' para ver las opciones disponibles.", 'source': 'default'})
+    
+   # Si no coincide con ninguna opción, usa el modelo semántico
+    semantic_responses = get_responses(user_message)
+    if semantic_responses:
+        reply_text = "\n".join(semantic_responses)
+    
+    else:
+        USER_CONTEXT[session_id] = {"intent": "contacto_directo"}
+        reply_text = "Lo siento, no estoy seguro de entenderte. 😕 ¿Quieres contactar directamente con el personal del hotel? (Responde 'si' o 'no')"
+    
+    return jsonify({'reply': reply_text, 'source': 'semantic'})
 
+
+
+def enviar_correo(nombre, correo, mensaje):
+    try:
+        # Configuración del servidor SMTP de Gmail
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+        remitente = "www.lui81@gmail.com"  
+        password = "orcl xqap lsua ikou"  
+
+        # Crear mensaje
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Nuevo mensaje de contacto - {nombre}"
+        msg["From"] = remitente
+        msg["To"] = "contactohotelparaiso@gmail.com"
+
+        # Cuerpo del correo
+        html = f"""
+        <html>
+          <body>
+            <h2>Nuevo mensaje de contacto</h2>
+            <p><b>Nombre:</b> {nombre}</p>
+            <p><b>Correo:</b> {correo}</p>
+            <p><b>Mensaje:</b></p>
+            <p>{mensaje}</p>
+          </body>
+        </html>
+        """
+        msg.attach(MIMEText(html, "html"))
+
+        # Enviar correo
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(remitente, password)
+            server.sendmail(remitente, msg["To"], msg.as_string())
+
+        print("✅ Correo enviado correctamente")
+        return True
+
+    except Exception as e:
+        print("❌ Error al enviar correo:", e)
+        return False
+
+
+@app.route('/enviar-contacto', methods=['POST'])
+def enviar_contacto():
+    data = request.get_json()
+    nombre = data.get('nombre')
+    correo = data.get('correo')
+    mensaje = data.get('mensaje')
+
+    if enviar_correo(nombre, correo, mensaje):
+        return jsonify({'reply': '✅ Gracias por tu mensaje. El personal del hotel te contactará pronto.'})
+    else:
+        return jsonify({'reply': '❌ Hubo un problema al enviar tu mensaje. Intenta más tarde.'})
 
 #  Endpoints adicionales opcionales (debug/consulta)
 @app.route('/menu', methods=['GET'])
@@ -145,8 +272,204 @@ def faq(item_id):
             return jsonify({'id': it.get('id'), 'question': it.get('question'), 'answer': it.get('response')})
     return jsonify({'error': 'not found'}), 404
 
+# ============================================
+# PANEL DE ADMINISTRADOR
+# ============================================
+
+ADMIN_PASSWORD = 'admin123'  # Contraseña por defecto
+ADMIN_TOKENS = {}  # Token temporal para sesiones
+
+def verify_admin_token(token):
+    """Verifica si el token es válido"""
+    return token in ADMIN_TOKENS
+
+@app.route('/admin-login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'GET':
+        return send_file('admin_login.html')
+    
+    # POST request para login
+    data = request.get_json()
+    password = data.get('password', '')
+    
+    if password == ADMIN_PASSWORD:
+        # Generar token simple (en producción usar JWT)
+        token = os.urandom(16).hex()
+        ADMIN_TOKENS[token] = True
+        return jsonify({'success': True, 'token': token})
+    else:
+        return jsonify({'success': False, 'message': 'Contraseña incorrecta'}), 401
+
+@app.route('/admin', methods=['GET'])
+def admin_panel():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token or not verify_admin_token(token):
+        # Verificar en localStorage desde el navegador
+        return send_file('admin.html')
+    return send_file('admin.html')
+
+@app.route('/admin/stats', methods=['GET'])
+def admin_stats():
+    """Retorna estadísticas del dataset"""
+    global DATASET
+    DATASET = load_dataset()
+    
+    intents = set(item.get('intent', 'general') for item in DATASET)
+    last_modified = os.path.getmtime(DATA_FILE)
+    from datetime import datetime
+    last_mod_date = datetime.fromtimestamp(last_modified).strftime('%Y-%m-%d %H:%M:%S')
+    
+    return jsonify({
+        'total_items': len(DATASET),
+        'unique_intents': len(intents),
+        'last_modified': last_mod_date
+    })
+
+@app.route('/admin/items', methods=['GET'])
+def admin_get_items():
+    """Retorna todos los items del dataset"""
+    global DATASET
+    DATASET = load_dataset()
+    return jsonify({'items': DATASET})
+
+@app.route('/admin/add-item', methods=['POST'])
+def admin_add_item():
+    """Agrega un nuevo item al dataset"""
+    global DATASET, embeddings, questions, responses, model
+    
+    data = request.get_json()
+    
+    # Validar datos
+    if not data.get('id') or not data.get('question') or not data.get('response'):
+        return jsonify({'success': False, 'error': 'Faltan campos requeridos'}), 400
+    
+    # Verificar que el ID sea único
+    if any(item['id'] == data['id'] for item in DATASET):
+        return jsonify({'success': False, 'error': 'El ID ya existe'}), 400
+    
+    new_item = {
+        'id': data['id'],
+        'question': data['question'],
+        'response': data['response'],
+        'intent': data.get('intent', 'general')
+    }
+    
+    DATASET.append(new_item)
+    
+    # Guardar cambios
+    save_dataset()
+    
+    # Recargar modelo
+    reload_model()
+    
+    return jsonify({'success': True, 'message': 'Item agregado exitosamente'})
+
+@app.route('/admin/update-item', methods=['POST'])
+def admin_update_item():
+    """Actualiza un item existente"""
+    global DATASET, embeddings, questions, responses, model
+    
+    data = request.get_json()
+    item_id = data.get('id')
+    
+    # Buscar y actualizar el item
+    for item in DATASET:
+        if item['id'] == item_id:
+            item['question'] = data.get('question', item['question'])
+            item['response'] = data.get('response', item['response'])
+            item['intent'] = data.get('intent', item.get('intent', 'general'))
+            
+            # Guardar cambios
+            save_dataset()
+            
+            # Recargar modelo
+            reload_model()
+            
+            return jsonify({'success': True, 'message': 'Item actualizado exitosamente'})
+    
+    return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+
+@app.route('/admin/delete-item', methods=['POST'])
+def admin_delete_item():
+    """Elimina un item del dataset"""
+    global DATASET, embeddings, questions, responses, model
+    
+    data = request.get_json()
+    item_id = data.get('id')
+    
+    # Buscar y eliminar el item
+    for i, item in enumerate(DATASET):
+        if item['id'] == item_id:
+            DATASET.pop(i)
+            
+            # Guardar cambios
+            save_dataset()
+            
+            # Recargar modelo
+            reload_model()
+            
+            return jsonify({'success': True, 'message': 'Item eliminado exitosamente'})
+    
+    return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+
+@app.route('/admin/export', methods=['GET'])
+def admin_export():
+    """Descarga el archivo dataset.json actual"""
+    return send_file(DATA_FILE, as_attachment=True, download_name='dataset.json')
+
+@app.route('/admin/import', methods=['POST'])
+def admin_import():
+    """Importa un archivo JSON de dataset"""
+    global DATASET, embeddings, questions, responses, model
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No se envió archivo'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'Archivo vacío'}), 400
+    
+    if not file.filename.endswith('.json'):
+        return jsonify({'success': False, 'error': 'El archivo debe ser JSON'}), 400
+    
+    try:
+        imported_data = json.load(file)
+        
+        # Validar estructura
+        if not isinstance(imported_data, list):
+            return jsonify({'success': False, 'error': 'El JSON debe contener una lista de items'}), 400
+        
+        # Validar que cada item tenga los campos necesarios
+        for item in imported_data:
+            if not all(key in item for key in ['id', 'question', 'response']):
+                return jsonify({'success': False, 'error': 'Items inválidos. Deben tener id, question y response'}), 400
+        
+        # Reemplazar dataset
+        DATASET = imported_data
+        save_dataset()
+        reload_model()
+        
+        return jsonify({'success': True, 'message': f'Se importaron {len(imported_data)} items exitosamente'})
+    
+    except json.JSONDecodeError:
+        return jsonify({'success': False, 'error': 'JSON inválido'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def save_dataset():
+    """Guarda el dataset en el archivo JSON"""
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(DATASET, f, ensure_ascii=False, indent=2)
+
+def reload_model():
+    """Recarga el dataset después de cambios"""
+    global DATASET
+    DATASET = load_dataset()
+    print("✅ Dataset actualizado después de cambios")
 
 # Ejecución del servidor Flask
+
 if __name__ == '__main__':
     app.run(debug=True)
 
